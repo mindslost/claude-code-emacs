@@ -1,4 +1,12 @@
-This Emacs module provides comprehensive integration with Claude Code. Here are the key features:
+This package provides Emacs integration for Claude Code, Anthropic's
+agentic command line tool for delegating coding tasks to Claude.
+
+Features:
+- Send code regions or entire buffers to Claude Code
+- Interactive prompts for coding tasks
+- Project-wide code analysis and refactoring
+- Integration with compilation mode for error handling
+- Customizable Claude Code command and arguments
 
 ## Main Functions
 
