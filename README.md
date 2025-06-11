@@ -1,83 +1,50 @@
-Here are several ways to install the Claude Code module into Emacs:
+This Emacs module provides comprehensive integration with Claude Code. Here are the key features:
 
-## Method 1: Manual Installation (Simplest)
+## Main Functions
 
-1. **Save the file**:
-   - Copy the code from the artifact and save it as `claude-code.el`
-   - Choose a location like `~/.emacs.d/lisp/claude-code.el`
+- **`claude-code-send-region`** - Send selected text to Claude Code
+- **`claude-code-send-buffer`** - Send entire buffer to Claude Code
+- **`claude-code-send-file`** - Send any file to Claude Code
+- **`claude-code-project-task`** - Execute project-wide tasks
+- **`claude-code-interactive`** - Start an interactive session
 
-2. **Add to your Emacs configuration**:
-   ```elisp
-   ;; Add to ~/.emacs or ~/.emacs.d/init.el
-   (add-to-list 'load-path "~/.emacs.d/lisp/")
-   (require 'claude-code)
-   
-   ;; Optional: Set up global keybinding
-   (global-set-key (kbd "C-c C") claude-code-map)
-   ```
+## Convenience Functions
 
-3. **Restart Emacs** or evaluate the configuration with `M-x eval-buffer`
+- **`claude-code-explain-code`** - Ask Claude to explain code
+- **`claude-code-refactor-code`** - Request code refactoring
+- **`claude-code-add-tests`** - Generate tests for code
+- **`claude-code-fix-errors`** - Identify and fix code issues
 
-## Method 2: Using `use-package` (Recommended)
+## Installation & Setup
 
-If you use `use-package`, add this to your config:
-
-```elisp
-(use-package claude-code
-  :load-path "~/.emacs.d/lisp/"
-  :bind ("C-c C" . claude-code-map)
-  :custom
-  (claude-code-executable "claude-code")
-  (claude-code-auto-scroll t))
-```
-
-## Method 3: Package Development Setup
-
-If you want to develop/modify the package:
-
-1. **Clone or create a directory**:
-   ```bash
-   mkdir ~/.emacs.d/dev/claude-code-emacs
-   cd ~/.emacs.d/dev/claude-code-emacs
-   ```
-
-2. **Save the file** as `claude-code.el` in that directory
-
-3. **Add to your config**:
-   ```elisp
-   (add-to-list 'load-path "~/.emacs.d/dev/claude-code-emacs/")
-   (require 'claude-code)
-   ```
-
-## Method 4: Straight.el (Advanced)
-
-If you use `straight.el` package manager:
+1. Save the code to a file named `claude-code.el`
+2. Add it to your Emacs load path
+3. Add to your `.emacs` or `init.el`:
 
 ```elisp
-(straight-use-package
- '(claude-code :type git :local-repo "~/.emacs.d/dev/claude-code-emacs"))
+(require 'claude-code)
+;; Optional: set up global keybinding
+(global-set-key (kbd "C-c C") claude-code-map)
 ```
 
-## Verification Steps
+## Configuration
 
-After installation:
+The module includes several customizable options:
+- `claude-code-executable` - Path to Claude Code binary
+- `claude-code-default-args` - Default command arguments
+- `claude-code-auto-scroll` - Auto-scroll output buffer
+- `claude-code-confirm-before-applying` - Confirmation before changes
 
-1. **Check if it loaded**: `M-x describe-function RET claude-code-send-region`
-2. **Test the keybinding**: Try `C-c C r` (if you set up the global binding)
-3. **Check customization**: `M-x customize-group RET claude-code`
+## Key Bindings (when prefix is set)
 
-## Prerequisites
+- `C-c C r` - Send region
+- `C-c C b` - Send buffer  
+- `C-c C f` - Send file
+- `C-c C p` - Project task
+- `C-c C i` - Interactive mode
+- `C-c C e` - Explain code
+- `C-c C R` - Refactor code
+- `C-c C t` - Add tests
+- `C-c C x` - Fix errors
 
-Make sure you have:
-- Claude Code installed and in your PATH
-- Emacs 26.1 or later
-- The `compile` and `project` packages (usually built-in)
-
-## Troubleshooting
-
-If you get errors:
-- Check that the file path is correct
-- Ensure Emacs can find Claude Code with `M-x shell-command RET which claude-code`
-- Verify your Emacs version with `M-x emacs-version`
-
-The manual installation method is usually the easiest to start with. Once you verify it works, you can switch to a more sophisticated package management approach if desired.
+The module handles process management, output formatting, and provides a clean interface for integrating Claude Code into your Emacs workflow. You'll need Claude Code installed and accessible in your PATH for this to work.
