@@ -169,17 +169,22 @@
                            (cons claude-code-executable args) " ")))
     (with-current-buffer buffer
       (claude-code-mode)
-      (goto-char (point-max))
-      (insert (format "\n=== Claude Code: %s ===\n" prompt))
-      (insert (format "Command: %s\n" command))
-      (insert "Output:\n"))
+      (let ((inhibit-read-only t))
+        (goto-char (point-max))
+        (insert (format "\n=== Claude Code: %s ===\n" prompt))
+        (insert (format "Command: %s\n" command))
+        (insert "Output:\n")))
     
-    (when claude-code-auto-scroll
-      (display-buffer buffer))
+    ;; Always display the buffer and make it active
+    (pop-to-buffer buffer)
+    (goto-char (point-max))
     
     (setq claude-code-process
           (start-process "claude-code" buffer
                         claude-code-executable prompt))
+    
+    (with-current-buffer buffer
+      (set-process-marker claude-code-process (point-max)))
     
     (set-process-sentinel claude-code-process 'claude-code--process-sentinel)
     (set-process-filter claude-code-process 'claude-code--process-filter)))
@@ -196,22 +201,26 @@
     (with-temp-file temp-file
       (insert input))
     
-    ;; Display the buffer
+    ;; Display the buffer and make it active
     (with-current-buffer buffer
       (claude-code-mode)
-      (goto-char (point-max))
-      (insert (format "\n=== Claude Code: %s ===\n" prompt))
-      (when filename
-        (insert (format "File: %s\n" filename)))
-      (insert "Output:\n"))
+      (let ((inhibit-read-only t))
+        (goto-char (point-max))
+        (insert (format "\n=== Claude Code: %s ===\n" prompt))
+        (when filename
+          (insert (format "File: %s\n" filename)))
+        (insert "Output:\n")))
     
-    (when claude-code-auto-scroll
-      (display-buffer buffer))
+    (pop-to-buffer buffer)
+    (goto-char (point-max))
     
     ;; Start the process
     (setq claude-code-process
           (apply 'start-process "claude-code" buffer
                  claude-code-executable args))
+    
+    (with-current-buffer buffer
+      (set-process-marker claude-code-process (point-max)))
     
     (set-process-sentinel claude-code-process 
                          (lambda (proc event)
@@ -226,17 +235,21 @@
     
     (with-current-buffer buffer
       (claude-code-mode)
-      (goto-char (point-max))
-      (insert (format "\n=== Claude Code: %s ===\n" prompt))
-      (insert (format "File: %s\n" file))
-      (insert "Output:\n"))
+      (let ((inhibit-read-only t))
+        (goto-char (point-max))
+        (insert (format "\n=== Claude Code: %s ===\n" prompt))
+        (insert (format "File: %s\n" file))
+        (insert "Output:\n")))
     
-    (when claude-code-auto-scroll
-      (display-buffer buffer))
+    (pop-to-buffer buffer)
+    (goto-char (point-max))
     
     (setq claude-code-process
           (apply 'start-process "claude-code" buffer
                  claude-code-executable args))
+    
+    (with-current-buffer buffer
+      (set-process-marker claude-code-process (point-max)))
     
     (set-process-sentinel claude-code-process 'claude-code--process-sentinel)
     (set-process-filter claude-code-process 'claude-code--process-filter)))
@@ -245,10 +258,14 @@
   "Filter function for Claude Code process PROC with output STRING."
   (when (buffer-live-p (process-buffer proc))
     (with-current-buffer (process-buffer proc)
-      (let ((moving (= (point) (process-mark proc))))
+      (let ((moving (= (point) (process-mark proc)))
+            (inhibit-read-only t))
         (save-excursion
           (goto-char (process-mark proc))
-          (insert (propertize string 'face 'claude-code-output-face))
+          ;; Insert the output with appropriate face
+          (let ((start (point)))
+            (insert string)
+            (put-text-property start (point) 'face 'claude-code-output-face))
           (set-marker (process-mark proc) (point)))
         (when moving
           (goto-char (process-mark proc)))
@@ -256,20 +273,24 @@
           (let ((window (get-buffer-window (current-buffer))))
             (when window
               (with-selected-window window
-                (goto-char (point-max))))))))))
+                (goto-char (point-max))
+                (recenter -1)))))))))
 
 (defun claude-code--process-sentinel (proc event)
   "Sentinel function for Claude Code process PROC with EVENT."
   (when (buffer-live-p (process-buffer proc))
     (with-current-buffer (process-buffer proc)
-      (goto-char (point-max))
-      (cond
-       ((string-match-p "finished" event)
-        (insert (propertize "\n=== Claude Code completed ===\n"
-                           'face 'claude-code-output-face)))
-       ((string-match-p "exited abnormally\\|killed" event)
-        (insert (propertize (format "\n=== Claude Code failed: %s ===\n" event)
-                           'face 'claude-code-error-face)))))))
+      (let ((inhibit-read-only t))
+        (goto-char (point-max))
+        (cond
+         ((string-match-p "finished" event)
+          (insert (propertize "\n=== Claude Code completed ===\n"
+                             'face 'claude-code-output-face))
+          (claude-code-insert-prompt))
+         ((string-match-p "exited abnormally\\|killed" event)
+          (insert (propertize (format "\n=== Claude Code failed: %s ===\n" event)
+                             'face 'claude-code-error-face))
+          (claude-code-insert-prompt)))))))
 
 (defun claude-code--get-project-root ()
   "Get the root directory of the current project."
@@ -277,14 +298,45 @@
     (project-root project)))
 
 ;; Major mode for Claude Code output buffer
-(define-derived-mode claude-code-mode special-mode "Claude Code"
-  "Major mode for Claude Code output buffer."
+(define-derived-mode claude-code-mode comint-mode "Claude Code"
+  "Major mode for Claude Code output buffer with interactive capabilities."
   (setq buffer-read-only nil)
-  (make-local-variable 'claude-code-process))
+  (setq comint-process-echoes t)
+  (setq comint-use-prompt-regexp t)
+  (make-local-variable 'claude-code-process)
+  (make-local-variable 'claude-code-input-ring)
+  (setq claude-code-input-ring (make-ring 50))
+  
+  ;; Enable input history
+  (set (make-local-variable 'comint-input-ring) claude-code-input-ring)
+  (set (make-local-variable 'comint-input-ring-size) 50)
+  
+  ;; Set up font-lock for better highlighting
+  (setq font-lock-defaults
+        '(claude-code-font-lock-keywords t nil nil nil))
+  
+  ;; Make it feel more like a terminal
+  (setq comint-scroll-to-bottom-on-input t)
+  (setq comint-scroll-to-bottom-on-output t)
+  (setq comint-move-point-for-output t))
+
+;; Font-lock keywords for better syntax highlighting
+(defvar claude-code-font-lock-keywords
+  '(("^===.*===$" . 'claude-code-prompt-face)
+    ("^Command:.*$" . 'font-lock-comment-face)
+    ("^Output:$" . 'font-lock-keyword-face)
+    ("^File:.*$" . 'font-lock-string-face)
+    ("ERROR\\|Error\\|error" . 'claude-code-error-face)
+    ("SUCCESS\\|Success\\|success\\|completed" . 'claude-code-output-face))
+  "Font-lock keywords for Claude Code mode.")
 
 (define-key claude-code-mode-map (kbd "q") 'quit-window)
 (define-key claude-code-mode-map (kbd "g") 'claude-code-refresh)
 (define-key claude-code-mode-map (kbd "k") 'claude-code-kill-process)
+(define-key claude-code-mode-map (kbd "C-c C-c") 'claude-code-interrupt)
+(define-key claude-code-mode-map (kbd "C-c C-d") 'claude-code-send-eof)
+(define-key claude-code-mode-map (kbd "C-c C-z") 'claude-code-stop-process)
+(define-key claude-code-mode-map (kbd "RET") 'claude-code-send-input)
 
 (defun claude-code-refresh ()
   "Refresh the Claude Code output buffer."
@@ -292,7 +344,8 @@
   (when (buffer-live-p (current-buffer))
     (let ((inhibit-read-only t))
       (erase-buffer)
-      (insert "Claude Code output buffer refreshed.\n"))))
+      (insert "Claude Code output buffer refreshed.\n")
+      (claude-code-insert-prompt))))
 
 (defun claude-code-kill-process ()
   "Kill the current Claude Code process."
@@ -301,6 +354,50 @@
              (process-live-p claude-code-process))
     (kill-process claude-code-process)
     (message "Claude Code process killed")))
+
+(defun claude-code-interrupt ()
+  "Send interrupt signal to Claude Code process."
+  (interactive)
+  (when (and claude-code-process
+             (process-live-p claude-code-process))
+    (interrupt-process claude-code-process)
+    (message "Interrupt signal sent to Claude Code")))
+
+(defun claude-code-send-eof ()
+  "Send EOF to Claude Code process."
+  (interactive)
+  (when (and claude-code-process
+             (process-live-p claude-code-process))
+    (process-send-eof claude-code-process)
+    (message "EOF sent to Claude Code")))
+
+(defun claude-code-stop-process ()
+  "Stop the Claude Code process gracefully."
+  (interactive)
+  (when (and claude-code-process
+             (process-live-p claude-code-process))
+    (process-send-string claude-code-process "exit\n")
+    (message "Stop signal sent to Claude Code")))
+
+(defun claude-code-send-input ()
+  "Send input to Claude Code process."
+  (interactive)
+  (when (and claude-code-process
+             (process-live-p claude-code-process))
+    (let ((input (buffer-substring-no-properties
+                  (line-beginning-position)
+                  (line-end-position))))
+      (unless (string-empty-p (string-trim input))
+        (process-send-string claude-code-process (concat input "\n"))
+        (goto-char (point-max))
+        (insert "\n")))))
+
+(defun claude-code-insert-prompt ()
+  "Insert a prompt in the Claude Code buffer."
+  (goto-char (point-max))
+  (unless (bolp) (insert "\n"))
+  (insert (propertize "claude-code> " 'face 'claude-code-prompt-face))
+  (set-marker (process-mark claude-code-process) (point)))
 
 ;; Keymap for convenient access
 (defvar claude-code-map
@@ -319,6 +416,132 @@
 
 ;; Optional: Set up a global key binding
 ;; (global-set-key (kbd "C-c C") claude-code-map)
+
+;;;###autoload
+(defun claude-code-shell-command (command)
+  "Execute a Claude Code shell command from within Emacs.
+This function can be called from shell buffers or via M-x."
+  (interactive "sClaud Code command: ")
+  (let ((parts (split-string command))
+        (action (car parts))
+        (args (cdr parts)))
+    (cond
+     ((string= action "explain")
+      (if args
+          (claude-code-send-file (car args) "Please explain what this code does and how it works:")
+        (claude-code-explain-code)))
+     
+     ((string= action "refactor")
+      (if args
+          (claude-code-send-file (car args) "Please refactor this code to improve readability, performance, and maintainability:")
+        (claude-code-refactor-code)))
+     
+     ((string= action "test")
+      (if args
+          (claude-code-send-file (car args) "Please add comprehensive tests for this code:")
+        (claude-code-add-tests)))
+     
+     ((string= action "fix")
+      (if args
+          (claude-code-send-file (car args) "Please identify and fix any errors or issues in this code:")
+        (claude-code-fix-errors)))
+     
+     ((string= action "project")
+      (if args
+          (claude-code-project-task (string-join args " "))
+        (call-interactively 'claude-code-project-task)))
+     
+     ((string= action "custom")
+      (if (>= (length args) 2)
+          (claude-code-send-file (car args) (string-join (cdr args) " "))
+        (message "Usage: claude-code custom <file> <prompt>")))
+     
+     (t
+      (message "Available commands: explain, refactor, test, fix, project, custom")))))
+
+;; Shell integration functions
+(defun claude-code-from-shell ()
+  "Handle claude-code commands from shell buffers."
+  (interactive)
+  (let ((command (read-string "Claude Code: ")))
+    (claude-code-shell-command command)))
+
+;; Add shell command completion
+(defvar claude-code-shell-commands
+  '("explain" "refactor" "test" "fix" "project" "custom")
+  "List of available Claude Code shell commands.")
+
+(defun claude-code-shell-completion (command)
+  "Completion function for Claude Code shell commands."
+  (let ((candidates claude-code-shell-commands))
+    (all-completions command candidates)))
+
+;; Integration with different shell modes
+(defun claude-code-setup-shell-integration ()
+  "Set up Claude Code integration with shell modes."
+  (interactive)
+  
+  ;; For eshell
+  (when (featurep 'eshell)
+    (add-hook 'eshell-mode-hook
+              (lambda ()
+                (define-key eshell-mode-map (kbd "C-c c") 'claude-code-from-shell))))
+  
+  ;; For shell mode
+  (add-hook 'shell-mode-hook
+            (lambda ()
+              (define-key shell-mode-map (kbd "C-c c") 'claude-code-from-shell)))
+  
+  ;; For term mode
+  (add-hook 'term-mode-hook
+            (lambda ()
+              (define-key term-raw-map (kbd "C-c c") 'claude-code-from-shell))))
+
+;; Eshell command definition
+(defun eshell/claude-code (&rest args)
+  "Eshell command for Claude Code integration."
+  (let ((command (string-join args " ")))
+    (claude-code-shell-command command)
+    nil)) ; Return nil to avoid printing return value
+
+;; Auto-setup shell integration when module loads
+(add-hook 'after-init-hook 'claude-code-setup-shell-integration)
+
+;; Helper function for getting current file in shell context
+(defun claude-code-get-current-file ()
+  "Get the current file, trying different methods based on context."
+  (cond
+   ;; If we're in a file buffer
+   ((buffer-file-name) (buffer-file-name))
+   
+   ;; If we're in a shell buffer, try to get the file from the command line
+   ((or (eq major-mode 'shell-mode)
+        (eq major-mode 'eshell-mode)
+        (eq major-mode 'term-mode))
+    (let ((file (read-file-name "File: ")))
+      (when (file-exists-p file) file)))
+   
+   ;; Default case
+   (t (read-file-name "File: "))))
+
+;; Enhanced shell commands that are context-aware
+;;;###autoload
+(defun claude-code-explain-current ()
+  "Explain the current file or prompt for one in shell context."
+  (interactive)
+  (let ((file (claude-code-get-current-file)))
+    (if file
+        (claude-code-send-file file "Please explain what this code does and how it works:")
+      (message "No file selected"))))
+
+;;;###autoload
+(defun claude-code-refactor-current ()
+  "Refactor the current file or prompt for one in shell context."
+  (interactive)
+  (let ((file (claude-code-get-current-file)))
+    (if file
+        (claude-code-send-file file "Please refactor this code to improve readability, performance, and maintainability:")
+      (message "No file selected"))))
 
 (provide 'claude-code)
 
