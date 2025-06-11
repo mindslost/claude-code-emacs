@@ -56,3 +56,50 @@ The module includes several customizable options:
 - `C-c C x` - Fix errors
 
 The module handles process management, output formatting, and provides a clean interface for integrating Claude Code into your Emacs workflow. You'll need Claude Code installed and accessible in your PATH for this to work.
+
+Now the Claude Code buffer is fully interactive! Here are the key improvements:
+
+## New Interactive Features:
+
+### **Real-time Interaction:**
+- Buffer is now based on `comint-mode` (like shell buffers)
+- You can see Claude Code output in real-time as it streams
+- The buffer automatically pops up and becomes active when you run commands
+
+### **Interactive Controls:**
+- **`RET`** - Send input to Claude Code process
+- **`C-c C-c`** - Interrupt the process (like Ctrl+C)
+- **`C-c C-d`** - Send EOF to process
+- **`C-c C-z`** - Stop process gracefully
+- **`k`** - Kill process
+- **`q`** - Quit window
+- **`g`** - Refresh buffer
+
+### **Enhanced Display:**
+- Better syntax highlighting for output
+- Proper font-lock keywords for errors, success messages, etc.
+- Process markers and prompts for better interaction
+- Auto-scrolling to show latest output
+
+### **Command History:**
+- Input history ring (like shell buffers)
+- Navigate through previous commands
+
+## How It Works Now:
+
+1. **When you send a buffer/region**: The Claude Code buffer opens and becomes active
+2. **Real-time output**: You see Claude Code's response streaming in real-time
+3. **Interactive session**: After the initial response, you get a `claude-code>` prompt
+4. **Continue conversation**: You can type additional prompts and press Enter
+5. **Process control**: Use the keyboard shortcuts to control the Claude Code process
+
+## Example Workflow:
+
+1. Run `claude-code-send-buffer` with prompt "explain this code"
+2. Claude Code buffer opens and shows real-time response
+3. When done, you see `claude-code>` prompt
+4. Type "now refactor it" and press Enter
+5. See the refactored code in real-time
+6. Continue the conversation as needed
+
+The buffer is now truly interactive and behaves like a proper terminal session with Claude Code!
