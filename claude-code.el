@@ -4,7 +4,7 @@
 
 ;; Author: Jason Lysinger <jasonlysinger@midnslost.com>
 ;; Version: 1.0.0
-;; Package-Requires: ((emacs "26.1"))
+;; Package-Requires: ((emacs "28.1") (vterm "0.0.1"))
 ;; Keywords: ai, coding, claude, anthropic
 ;; URL: https://github.com/mindslost/claude-code-emacs
 
@@ -24,6 +24,7 @@
 
 (require 'compile)
 (require 'project)
+(require 'vterm)
 
 (defgroup claude-code nil
   "Emacs integration for Claude Code."
@@ -40,10 +41,11 @@
   :type '(repeat string)
   :group 'claude-code)
 
-(defcustom claude-code-buffer-name "*Claude Code*"
-  "Name of the buffer to display Claude Code output."
+(defcustom claude-code-vterm-name "*Claude Code*"
+  "Name of the vterm buffer for Claude Code."
   :type 'string
   :group 'claude-code)
+
 
 (defcustom claude-code-auto-scroll t
   "Whether to auto-scroll the Claude Code output buffer."
@@ -61,18 +63,22 @@
 (defvar claude-code-process nil
   "Current Claude Code process.")
 
+(defvar claude-code-input-ring nil
+  "Input history ring for Claude Code.")
+
+
 (defface claude-code-prompt-face
-  '((t (:foreground "cyan" :weight bold)))
+  '((t (:foreground "#00ff00" :weight bold)))
   "Face for Claude Code prompts."
   :group 'claude-code)
 
 (defface claude-code-output-face
-  '((t (:foreground "green")))
+  '((t (:foreground "#ffffff")))
   "Face for Claude Code output."
   :group 'claude-code)
 
 (defface claude-code-error-face
-  '((t (:foreground "red" :weight bold)))
+  '((t (:foreground "#ff0000" :weight bold)))
   "Face for Claude Code errors."
   :group 'claude-code)
 
@@ -85,7 +91,7 @@
          (read-string "Claude Code prompt: " nil 'claude-code-history)))
   (let ((code (buffer-substring-no-properties start end))
         (filename (buffer-file-name)))
-    (claude-code--execute-with-input code prompt filename)))
+    (claude-code--execute-in-vterm-with-input code prompt filename)))
 
 ;;;###autoload
 (defun claude-code-send-buffer (prompt)
@@ -100,7 +106,7 @@
   (interactive
    (list (read-file-name "File to send to Claude Code: ")
          (read-string "Claude Code prompt: " nil 'claude-code-history)))
-  (claude-code--execute-with-file file prompt))
+  (claude-code--execute-in-vterm-with-file file prompt))
 
 ;;;###autoload
 (defun claude-code-project-task (prompt)
@@ -110,20 +116,15 @@
   (let ((project-root (claude-code--get-project-root)))
     (if project-root
         (let ((default-directory project-root))
-          (claude-code--execute prompt))
+          (claude-code--execute-in-vterm prompt))
       (error "Not in a project directory"))))
 
 ;;;###autoload
 (defun claude-code-interactive ()
-  "Start an interactive Claude Code session."
+  "Start an interactive Claude Code session in vterm."
   (interactive)
-  (let ((buffer (get-buffer-create claude-code-buffer-name)))
-    (with-current-buffer buffer
-      (claude-code-mode)
-      (goto-char (point-max))
-      (insert "\n=== Interactive Claude Code Session ===\n")
-      (insert "Type your prompts below. Use C-c C-c to send.\n\n"))
-    (pop-to-buffer buffer)))
+  (claude-code--start-vterm-session))
+
 
 ;;;###autoload
 (defun claude-code-explain-code ()
@@ -161,243 +162,105 @@
         (end (if (use-region-p) (region-end) (point-max))))
     (claude-code-send-region start end prompt)))
 
-(defun claude-code--execute (prompt &optional input-file)
-  "Execute Claude Code with PROMPT and optional INPUT-FILE."
-  (let* ((buffer (get-buffer-create claude-code-buffer-name))
-         (args (append claude-code-default-args (list prompt)))
-         (command (mapconcat 'shell-quote-argument
-                           (cons claude-code-executable args) " ")))
-    (with-current-buffer buffer
-      (claude-code-mode)
-      (let ((inhibit-read-only t))
-        (goto-char (point-max))
-        (insert (format "\n=== Claude Code: %s ===\n" prompt))
-        (insert (format "Command: %s\n" command))
-        (insert "Output:\n")))
-    
-    ;; Always display the buffer and make it active
-    (pop-to-buffer buffer)
-    (goto-char (point-max))
-    
-    (setq claude-code-process
-          (start-process "claude-code" buffer
-                        claude-code-executable prompt))
-    
-    (with-current-buffer buffer
-      (set-process-marker claude-code-process (point-max)))
-    
-    (set-process-sentinel claude-code-process 'claude-code--process-sentinel)
-    (set-process-filter claude-code-process 'claude-code--process-filter)))
+(defun claude-code--execute-in-vterm (prompt)
+  "Execute Claude Code with PROMPT in vterm."
+  (let ((vterm-buffer (claude-code--get-or-create-vterm)))
+    (with-current-buffer vterm-buffer
+      (let ((command (format "%s %s"
+                           (shell-quote-argument claude-code-executable)
+                           (shell-quote-argument prompt))))
+        (claude-code--send-to-vterm command)))))
 
-(defun claude-code--execute-with-input (input prompt &optional filename)
-  "Execute Claude Code with INPUT text and PROMPT, optionally for FILENAME."
-  (let* ((buffer (get-buffer-create claude-code-buffer-name))
-         (temp-file (make-temp-file "claude-code-" nil
+(defun claude-code--execute-in-vterm-with-input (input prompt &optional filename)
+  "Execute Claude Code with INPUT text and PROMPT in vterm.
+Optionally specify FILENAME for context."
+  (let* ((temp-file (make-temp-file "claude-code-" nil
                                    (when filename
                                      (concat "." (file-name-extension filename)))))
-         (args (append claude-code-default-args (list prompt temp-file))))
+         (vterm-buffer (claude-code--get-or-create-vterm)))
     
     ;; Write input to temporary file
     (with-temp-file temp-file
       (insert input))
     
-    ;; Display the buffer and make it active
-    (with-current-buffer buffer
-      (claude-code-mode)
-      (let ((inhibit-read-only t))
-        (goto-char (point-max))
-        (insert (format "\n=== Claude Code: %s ===\n" prompt))
-        (when filename
-          (insert (format "File: %s\n" filename)))
-        (insert "Output:\n")))
-    
-    (pop-to-buffer buffer)
-    (goto-char (point-max))
-    
-    ;; Start the process
-    (setq claude-code-process
-          (apply 'start-process "claude-code" buffer
-                 claude-code-executable args))
-    
-    (with-current-buffer buffer
-      (set-process-marker claude-code-process (point-max)))
-    
-    (set-process-sentinel claude-code-process 
-                         (lambda (proc event)
-                           (claude-code--process-sentinel proc event)
-                           (delete-file temp-file)))
-    (set-process-filter claude-code-process 'claude-code--process-filter)))
+    (with-current-buffer vterm-buffer
+      (when filename
+        (claude-code--send-to-vterm (format "echo 'Processing file: %s'" filename)))
+      (let ((command (format "%s %s %s"
+                           (shell-quote-argument claude-code-executable)
+                           (shell-quote-argument prompt)
+                           (shell-quote-argument temp-file))))
+        (claude-code--send-to-vterm command)
+        ;; Clean up temp file after a delay
+        (run-with-timer 1 nil (lambda () (when (file-exists-p temp-file)
+                                          (delete-file temp-file))))))))
 
-(defun claude-code--execute-with-file (file prompt)
-  "Execute Claude Code with FILE and PROMPT."
-  (let* ((buffer (get-buffer-create claude-code-buffer-name))
-         (args (append claude-code-default-args (list prompt file))))
-    
-    (with-current-buffer buffer
-      (claude-code-mode)
-      (let ((inhibit-read-only t))
-        (goto-char (point-max))
-        (insert (format "\n=== Claude Code: %s ===\n" prompt))
-        (insert (format "File: %s\n" file))
-        (insert "Output:\n")))
-    
-    (pop-to-buffer buffer)
-    (goto-char (point-max))
-    
-    (setq claude-code-process
-          (apply 'start-process "claude-code" buffer
-                 claude-code-executable args))
-    
-    (with-current-buffer buffer
-      (set-process-marker claude-code-process (point-max)))
-    
-    (set-process-sentinel claude-code-process 'claude-code--process-sentinel)
-    (set-process-filter claude-code-process 'claude-code--process-filter)))
-
-(defun claude-code--process-filter (proc string)
-  "Filter function for Claude Code process PROC with output STRING."
-  (when (buffer-live-p (process-buffer proc))
-    (with-current-buffer (process-buffer proc)
-      (let ((moving (= (point) (process-mark proc)))
-            (inhibit-read-only t))
-        (save-excursion
-          (goto-char (process-mark proc))
-          ;; Insert the output with appropriate face
-          (let ((start (point)))
-            (insert string)
-            (put-text-property start (point) 'face 'claude-code-output-face))
-          (set-marker (process-mark proc) (point)))
-        (when moving
-          (goto-char (process-mark proc)))
-        (when claude-code-auto-scroll
-          (let ((window (get-buffer-window (current-buffer))))
-            (when window
-              (with-selected-window window
-                (goto-char (point-max))
-                (recenter -1)))))))))
-
-(defun claude-code--process-sentinel (proc event)
-  "Sentinel function for Claude Code process PROC with EVENT."
-  (when (buffer-live-p (process-buffer proc))
-    (with-current-buffer (process-buffer proc)
-      (let ((inhibit-read-only t))
-        (goto-char (point-max))
-        (cond
-         ((string-match-p "finished" event)
-          (insert (propertize "\n=== Claude Code completed ===\n"
-                             'face 'claude-code-output-face))
-          (claude-code-insert-prompt))
-         ((string-match-p "exited abnormally\\|killed" event)
-          (insert (propertize (format "\n=== Claude Code failed: %s ===\n" event)
-                             'face 'claude-code-error-face))
-          (claude-code-insert-prompt)))))))
+(defun claude-code--execute-in-vterm-with-file (file prompt)
+  "Execute Claude Code with FILE and PROMPT in vterm."
+  (let ((vterm-buffer (claude-code--get-or-create-vterm)))
+    (with-current-buffer vterm-buffer
+      (claude-code--send-to-vterm (format "echo 'Processing file: %s'" file))
+      (let ((command (format "%s %s %s"
+                           (shell-quote-argument claude-code-executable)
+                           (shell-quote-argument prompt)
+                           (shell-quote-argument file))))
+        (claude-code--send-to-vterm command)))))
 
 (defun claude-code--get-project-root ()
   "Get the root directory of the current project."
   (when-let ((project (project-current)))
     (project-root project)))
 
-;; Major mode for Claude Code output buffer
-(define-derived-mode claude-code-mode comint-mode "Claude Code"
-  "Major mode for Claude Code output buffer with interactive capabilities."
-  (setq buffer-read-only nil)
-  (setq comint-process-echoes t)
-  (setq comint-use-prompt-regexp t)
-  (make-local-variable 'claude-code-process)
-  (make-local-variable 'claude-code-input-ring)
-  (setq claude-code-input-ring (make-ring 50))
-  
-  ;; Enable input history
-  (set (make-local-variable 'comint-input-ring) claude-code-input-ring)
-  (set (make-local-variable 'comint-input-ring-size) 50)
-  
-  ;; Set up font-lock for better highlighting
-  (setq font-lock-defaults
-        '(claude-code-font-lock-keywords t nil nil nil))
-  
-  ;; Make it feel more like a terminal
-  (setq comint-scroll-to-bottom-on-input t)
-  (setq comint-scroll-to-bottom-on-output t)
-  (setq comint-move-point-for-output t))
+(defun claude-code--get-or-create-vterm ()
+  "Get or create a vterm buffer for Claude Code."
+  (let ((vterm-buffer-name claude-code-vterm-name))
+    (or (get-buffer vterm-buffer-name)
+        (claude-code--create-vterm-buffer vterm-buffer-name))))
 
-;; Font-lock keywords for better syntax highlighting
+(defun claude-code--create-vterm-buffer (buffer-name)
+  "Create a new vterm buffer with BUFFER-NAME."
+  (let ((vterm-buffer (get-buffer-create buffer-name)))
+    (with-current-buffer vterm-buffer
+      (vterm-mode)
+      (rename-buffer buffer-name))
+    (pop-to-buffer vterm-buffer)
+    vterm-buffer))
+
+
+(defun claude-code--send-to-vterm (command)
+  "Send COMMAND to the current vterm buffer."
+  (vterm-send-string command)
+  (vterm-send-return))
+
+(defun claude-code--start-vterm-session ()
+  "Start an interactive Claude Code session in vterm."
+  (let ((vterm-buffer (claude-code--get-or-create-vterm)))
+    (with-current-buffer vterm-buffer
+      (claude-code--send-to-vterm "echo 'Starting Claude Code interactive session...'")
+      (claude-code--send-to-vterm claude-code-executable))
+    (pop-to-buffer vterm-buffer)))
+
+
+;; Simplified mode for vterm integration
+(define-derived-mode claude-code-mode fundamental-mode "Claude Code"
+  "Simple mode for Claude Code integration."
+  (setq-local comment-start "# ")
+  (setq-local comment-end ""))
+
+;; Font-lock keywords
 (defvar claude-code-font-lock-keywords
-  '(("^===.*===$" . 'claude-code-prompt-face)
-    ("^Command:.*$" . 'font-lock-comment-face)
-    ("^Output:$" . 'font-lock-keyword-face)
-    ("^File:.*$" . 'font-lock-string-face)
-    ("ERROR\\|Error\\|error" . 'claude-code-error-face)
-    ("SUCCESS\\|Success\\|success\\|completed" . 'claude-code-output-face))
+  '(("ERROR\\|Error\\|error\\|FAILED\\|Failed\\|failed" . 'claude-code-error-face)
+    ("SUCCESS\\|Success\\|success\\|completed\\|DONE\\|Done\\|done" . 'claude-code-prompt-face))
   "Font-lock keywords for Claude Code mode.")
 
-(define-key claude-code-mode-map (kbd "q") 'quit-window)
-(define-key claude-code-mode-map (kbd "g") 'claude-code-refresh)
-(define-key claude-code-mode-map (kbd "k") 'claude-code-kill-process)
-(define-key claude-code-mode-map (kbd "C-c C-c") 'claude-code-interrupt)
-(define-key claude-code-mode-map (kbd "C-c C-d") 'claude-code-send-eof)
-(define-key claude-code-mode-map (kbd "C-c C-z") 'claude-code-stop-process)
-(define-key claude-code-mode-map (kbd "RET") 'claude-code-send-input)
+;; Basic key bindings
+(define-key claude-code-mode-map (kbd "C-c C-s") 'claude-code-interactive)
 
-(defun claude-code-refresh ()
-  "Refresh the Claude Code output buffer."
+(defun claude-code-open-vterm ()
+  "Open the Claude Code vterm buffer."
   (interactive)
-  (when (buffer-live-p (current-buffer))
-    (let ((inhibit-read-only t))
-      (erase-buffer)
-      (insert "Claude Code output buffer refreshed.\n")
-      (claude-code-insert-prompt))))
-
-(defun claude-code-kill-process ()
-  "Kill the current Claude Code process."
-  (interactive)
-  (when (and claude-code-process
-             (process-live-p claude-code-process))
-    (kill-process claude-code-process)
-    (message "Claude Code process killed")))
-
-(defun claude-code-interrupt ()
-  "Send interrupt signal to Claude Code process."
-  (interactive)
-  (when (and claude-code-process
-             (process-live-p claude-code-process))
-    (interrupt-process claude-code-process)
-    (message "Interrupt signal sent to Claude Code")))
-
-(defun claude-code-send-eof ()
-  "Send EOF to Claude Code process."
-  (interactive)
-  (when (and claude-code-process
-             (process-live-p claude-code-process))
-    (process-send-eof claude-code-process)
-    (message "EOF sent to Claude Code")))
-
-(defun claude-code-stop-process ()
-  "Stop the Claude Code process gracefully."
-  (interactive)
-  (when (and claude-code-process
-             (process-live-p claude-code-process))
-    (process-send-string claude-code-process "exit\n")
-    (message "Stop signal sent to Claude Code")))
-
-(defun claude-code-send-input ()
-  "Send input to Claude Code process."
-  (interactive)
-  (when (and claude-code-process
-             (process-live-p claude-code-process))
-    (let ((input (buffer-substring-no-properties
-                  (line-beginning-position)
-                  (line-end-position))))
-      (unless (string-empty-p (string-trim input))
-        (process-send-string claude-code-process (concat input "\n"))
-        (goto-char (point-max))
-        (insert "\n")))))
-
-(defun claude-code-insert-prompt ()
-  "Insert a prompt in the Claude Code buffer."
-  (goto-char (point-max))
-  (unless (bolp) (insert "\n"))
-  (insert (propertize "claude-code> " 'face 'claude-code-prompt-face))
-  (set-marker (process-mark claude-code-process) (point)))
+  (let ((vterm-buffer (claude-code--get-or-create-vterm)))
+    (pop-to-buffer vterm-buffer)))
 
 ;; Keymap for convenient access
 (defvar claude-code-map
@@ -407,6 +270,7 @@
     (define-key map (kbd "f") 'claude-code-send-file)
     (define-key map (kbd "p") 'claude-code-project-task)
     (define-key map (kbd "i") 'claude-code-interactive)
+    (define-key map (kbd "s") 'claude-code-open-vterm)
     (define-key map (kbd "e") 'claude-code-explain-code)
     (define-key map (kbd "R") 'claude-code-refactor-code)
     (define-key map (kbd "t") 'claude-code-add-tests)
@@ -416,132 +280,6 @@
 
 ;; Optional: Set up a global key binding
 ;; (global-set-key (kbd "C-c C") claude-code-map)
-
-;;;###autoload
-(defun claude-code-shell-command (command)
-  "Execute a Claude Code shell command from within Emacs.
-This function can be called from shell buffers or via M-x."
-  (interactive "sClaud Code command: ")
-  (let ((parts (split-string command))
-        (action (car parts))
-        (args (cdr parts)))
-    (cond
-     ((string= action "explain")
-      (if args
-          (claude-code-send-file (car args) "Please explain what this code does and how it works:")
-        (claude-code-explain-code)))
-     
-     ((string= action "refactor")
-      (if args
-          (claude-code-send-file (car args) "Please refactor this code to improve readability, performance, and maintainability:")
-        (claude-code-refactor-code)))
-     
-     ((string= action "test")
-      (if args
-          (claude-code-send-file (car args) "Please add comprehensive tests for this code:")
-        (claude-code-add-tests)))
-     
-     ((string= action "fix")
-      (if args
-          (claude-code-send-file (car args) "Please identify and fix any errors or issues in this code:")
-        (claude-code-fix-errors)))
-     
-     ((string= action "project")
-      (if args
-          (claude-code-project-task (string-join args " "))
-        (call-interactively 'claude-code-project-task)))
-     
-     ((string= action "custom")
-      (if (>= (length args) 2)
-          (claude-code-send-file (car args) (string-join (cdr args) " "))
-        (message "Usage: claude-code custom <file> <prompt>")))
-     
-     (t
-      (message "Available commands: explain, refactor, test, fix, project, custom")))))
-
-;; Shell integration functions
-(defun claude-code-from-shell ()
-  "Handle claude-code commands from shell buffers."
-  (interactive)
-  (let ((command (read-string "Claude Code: ")))
-    (claude-code-shell-command command)))
-
-;; Add shell command completion
-(defvar claude-code-shell-commands
-  '("explain" "refactor" "test" "fix" "project" "custom")
-  "List of available Claude Code shell commands.")
-
-(defun claude-code-shell-completion (command)
-  "Completion function for Claude Code shell commands."
-  (let ((candidates claude-code-shell-commands))
-    (all-completions command candidates)))
-
-;; Integration with different shell modes
-(defun claude-code-setup-shell-integration ()
-  "Set up Claude Code integration with shell modes."
-  (interactive)
-  
-  ;; For eshell
-  (when (featurep 'eshell)
-    (add-hook 'eshell-mode-hook
-              (lambda ()
-                (define-key eshell-mode-map (kbd "C-c c") 'claude-code-from-shell))))
-  
-  ;; For shell mode
-  (add-hook 'shell-mode-hook
-            (lambda ()
-              (define-key shell-mode-map (kbd "C-c c") 'claude-code-from-shell)))
-  
-  ;; For term mode
-  (add-hook 'term-mode-hook
-            (lambda ()
-              (define-key term-raw-map (kbd "C-c c") 'claude-code-from-shell))))
-
-;; Eshell command definition
-(defun eshell/claude-code (&rest args)
-  "Eshell command for Claude Code integration."
-  (let ((command (string-join args " ")))
-    (claude-code-shell-command command)
-    nil)) ; Return nil to avoid printing return value
-
-;; Auto-setup shell integration when module loads
-(add-hook 'after-init-hook 'claude-code-setup-shell-integration)
-
-;; Helper function for getting current file in shell context
-(defun claude-code-get-current-file ()
-  "Get the current file, trying different methods based on context."
-  (cond
-   ;; If we're in a file buffer
-   ((buffer-file-name) (buffer-file-name))
-   
-   ;; If we're in a shell buffer, try to get the file from the command line
-   ((or (eq major-mode 'shell-mode)
-        (eq major-mode 'eshell-mode)
-        (eq major-mode 'term-mode))
-    (let ((file (read-file-name "File: ")))
-      (when (file-exists-p file) file)))
-   
-   ;; Default case
-   (t (read-file-name "File: "))))
-
-;; Enhanced shell commands that are context-aware
-;;;###autoload
-(defun claude-code-explain-current ()
-  "Explain the current file or prompt for one in shell context."
-  (interactive)
-  (let ((file (claude-code-get-current-file)))
-    (if file
-        (claude-code-send-file file "Please explain what this code does and how it works:")
-      (message "No file selected"))))
-
-;;;###autoload
-(defun claude-code-refactor-current ()
-  "Refactor the current file or prompt for one in shell context."
-  (interactive)
-  (let ((file (claude-code-get-current-file)))
-    (if file
-        (claude-code-send-file file "Please refactor this code to improve readability, performance, and maintainability:")
-      (message "No file selected"))))
 
 (provide 'claude-code)
 

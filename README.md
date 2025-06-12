@@ -1,12 +1,22 @@
+# Claude Code Emacs Integration
+
 This package provides Emacs integration for Claude Code, Anthropic's
 agentic command line tool for delegating coding tasks to Claude.
 
-Features:
+## Features
+
 - Send code regions or entire buffers to Claude Code
 - Interactive prompts for coding tasks
 - Project-wide code analysis and refactoring
-- Integration with compilation mode for error handling
+- Full terminal integration using vterm
 - Customizable Claude Code command and arguments
+- Pre-built convenience functions for common tasks
+
+## Requirements
+
+- Emacs 28.1+
+- [vterm](https://github.com/akermu/emacs-libvterm) package
+- Claude Code CLI tool installed and accessible in PATH
 
 ## Main Functions
 
@@ -14,7 +24,8 @@ Features:
 - **`claude-code-send-buffer`** - Send entire buffer to Claude Code
 - **`claude-code-send-file`** - Send any file to Claude Code
 - **`claude-code-project-task`** - Execute project-wide tasks
-- **`claude-code-interactive`** - Start an interactive session
+- **`claude-code-interactive`** - Start an interactive Claude Code session
+- **`claude-code-open-vterm`** - Open the Claude Code vterm buffer
 
 ## Convenience Functions
 
@@ -25,9 +36,12 @@ Features:
 
 ## Installation & Setup
 
-1. Save the code to a file named `claude-code.el`
-2. Add it to your Emacs load path
-3. Add to your `.emacs` or `init.el`:
+See [INSTALL.md](INSTALL.md) for detailed installation instructions.
+
+Quick setup:
+1. Install vterm package
+2. Save `claude-code.el` to your load path
+3. Add to your configuration:
 
 ```elisp
 (require 'claude-code)
@@ -37,69 +51,57 @@ Features:
 
 ## Configuration
 
-The module includes several customizable options:
-- `claude-code-executable` - Path to Claude Code binary
+The package includes several customizable options:
+- `claude-code-executable` - Path to Claude Code binary (default: "claude-code")
 - `claude-code-default-args` - Default command arguments
-- `claude-code-auto-scroll` - Auto-scroll output buffer
+- `claude-code-vterm-name` - Name of the vterm buffer (default: "*Claude Code*")
 - `claude-code-confirm-before-applying` - Confirmation before changes
 
-## Key Bindings (when prefix is set)
+## Key Bindings
 
-- `C-c C r` - Send region
-- `C-c C b` - Send buffer  
-- `C-c C f` - Send file
-- `C-c C p` - Project task
-- `C-c C i` - Interactive mode
-- `C-c C e` - Explain code
-- `C-c C R` - Refactor code
-- `C-c C t` - Add tests
-- `C-c C x` - Fix errors
+When using the built-in keymap (`claude-code-map`):
 
-The module handles process management, output formatting, and provides a clean interface for integrating Claude Code into your Emacs workflow. You'll need Claude Code installed and accessible in your PATH for this to work.
+- `r` - Send region
+- `b` - Send buffer  
+- `f` - Send file
+- `p` - Project task
+- `i` - Interactive mode
+- `s` - Open vterm buffer
+- `e` - Explain code
+- `R` - Refactor code
+- `t` - Add tests
+- `x` - Fix errors
 
-Now the Claude Code buffer is fully interactive! Here are the key improvements:
+## How It Works
 
-## New Interactive Features:
+### Vterm Integration
 
-### **Real-time Interaction:**
-- Buffer is now based on `comint-mode` (like shell buffers)
-- You can see Claude Code output in real-time as it streams
-- The buffer automatically pops up and becomes active when you run commands
+All Claude Code interactions happen within a dedicated vterm buffer, providing:
+- **Full terminal experience** - Complete terminal emulation with proper colors and formatting
+- **Real-time output** - See Claude Code responses as they stream
+- **Interactive session** - Continue conversations after initial commands
+- **Terminal controls** - Full keyboard support for terminal navigation
 
-### **Interactive Controls:**
-- **`RET`** - Send input to Claude Code process
-- **`C-c C-c`** - Interrupt the process (like Ctrl+C)
-- **`C-c C-d`** - Send EOF to process
-- **`C-c C-z`** - Stop process gracefully
-- **`k`** - Kill process
-- **`q`** - Quit window
-- **`g`** - Refresh buffer
+### Workflow Example
 
-### **Enhanced Display:**
-- Better syntax highlighting for output
-- Proper font-lock keywords for errors, success messages, etc.
-- Process markers and prompts for better interaction
-- Auto-scrolling to show latest output
+1. **Send code**: Run `claude-code-send-buffer` with prompt "explain this code"  
+2. **Vterm opens**: Claude Code vterm buffer opens showing real-time response
+3. **Interactive session**: After response, you can continue typing commands
+4. **Full terminal**: Use all standard terminal features (scrolling, copying, etc.)
+5. **Persistent session**: The vterm stays open for continued interaction
 
-### **Command History:**
-- Input history ring (like shell buffers)
-- Navigate through previous commands
+### File and Project Integration
 
-## How It Works Now:
+- **File context**: When sending files, the full file path is shared with Claude
+- **Project awareness**: Project tasks automatically set the correct working directory
+- **Temporary files**: Code regions are safely passed via temporary files
 
-1. **When you send a buffer/region**: The Claude Code buffer opens and becomes active
-2. **Real-time output**: You see Claude Code's response streaming in real-time
-3. **Interactive session**: After the initial response, you get a `claude-code>` prompt
-4. **Continue conversation**: You can type additional prompts and press Enter
-5. **Process control**: Use the keyboard shortcuts to control the Claude Code process
+## Vterm Benefits
 
-## Example Workflow:
+Using vterm provides several advantages over traditional shell integration:
+- **Better performance** - Native terminal emulation
+- **Full compatibility** - Works with all Claude Code features
+- **Rich formatting** - Proper colors, styling, and terminal graphics
+- **Standard terminal** - All familiar terminal shortcuts and behaviors work
 
-1. Run `claude-code-send-buffer` with prompt "explain this code"
-2. Claude Code buffer opens and shows real-time response
-3. When done, you see `claude-code>` prompt
-4. Type "now refactor it" and press Enter
-5. See the refactored code in real-time
-6. Continue the conversation as needed
-
-The buffer is now truly interactive and behaves like a proper terminal session with Claude Code!
+The package requires vterm to be installed and will create a dedicated Claude Code terminal for all interactions.
